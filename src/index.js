@@ -144,10 +144,8 @@ function lazyMatcher(url, form, isWrite, state) {
 	const param = name => form.get(name) ?? url.searchParams.get(name);
 	const cmd = param('cmd');
 	const plugin = param('plugin');
-	const pcmd = param('pcmd');
 
 	if (plugin === 'rename' && isWrite) return () => true;
-	if (plugin === 'attach' && pcmd === 'list' && !param('refer')) return p => p.startsWith('attach/');
 
 	const pages = new Set();
 	for (const name of ['page', 'refer']) {

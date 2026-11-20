@@ -23,15 +23,16 @@ scripts/
 
 | キー | 内容 |
 | --- | --- |
-| `pack.bin.gz` | wiki/ diff/ cache/ counter/ attach/*.log をまとめたもの。書き込みのコミット点 (etag で楽観ロック) |
-| `files/backup/…`, `files/attach/…` | バックアップと添付ファイル本体。必要なリクエストでだけ読み込む |
+| `manifest.json` | 書き込みのコミット点 (etag で楽観ロック)。シャードのキーと遅延ファイルの一覧 (パス, 日時, サイズ) |
+| `pack/<n>-<uuid>.bin.gz` | wiki/ diff/ cache/ counter/ attach/*.log をパスのハッシュで 16 個に分けたもの。書き込みでは変わったシャードだけ作り直す |
+| `files/backup/…`, `files/attach/…` | バックアップと添付ファイル本体。必要なリクエストでだけ読み込む (未読み込みでも filesize() 等は manifest のサイズを返す) |
 | `sessions/sess_…` | ログインセッション |
 
 ### 高速化
 
-- PHP インスタンスと展開済みファイルを isolate 内で使い回す。R2 へは pack の etag 確認 (条件付き GET) だけで、閲覧時は 1.5 秒に 1 回に間引く
+- PHP インスタンスと展開済みファイルを isolate 内で使い回す。R2 へは manifest の etag 確認 (条件付き GET) だけで、閲覧時は 1.5 秒に 1 回に間引く
 - OPcache (ファイルキャッシュ) をビルド時に生成して同梱。cold start でもコンパイルしない
-- 未ログインの GET は描画結果を isolate 内にキャッシュ (pack の etag をキーに含むので更新で自動的に無効化)
+- 未ログインの GET は描画結果を isolate 内にキャッシュ (manifest の etag をキーに含むので更新で自動的に無効化)
 - skin/ image/ の静的ファイルは Static Assets から直接返す
 
 ### Workers 向けの工夫
@@ -73,9 +74,7 @@ npm run deploy
 ## 制限
 
 - isolate 内のリクエストは直列に処理する (PHP インスタンスが 1 つのため)
-- 書き込みのたびに pack 全体を書き直すので、ページ数が非常に多くなると書き込みが重くなる
 - 添付ファイルは 1MB まで (PukiWiki の既定)。アップロード・削除は管理者のみ (既定)
-- 全ページの添付一覧 (`?plugin=attach&pcmd=list`) はすべての添付を R2 から読み込む
 - 他の isolate での更新は最大 1.5 秒遅れて見えることがある (閲覧時の R2 確認を間引いているため)
 
 ## ライセンス
