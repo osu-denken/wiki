@@ -3,6 +3,9 @@
   "name": "denken-wiki",
   "main": "src/index.js",
   "compatibility_date": "2026-11-01",
+  "routes": [
+    { "pattern": "wiki.osu-denken.net", "custom_domain": true }
+  ],
   "assets": {
     // skin/*.css, image/* などは PHP を通さずに返す
     "directory": "build/public"
