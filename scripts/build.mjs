@@ -42,6 +42,14 @@ glue = glue.replace(sigHook,
 	'var module=Module["sigModules"]&&Module["sigModules"][sig];'
 	+ 'if(!module){if(Module["onSignature"])Module["onSignature"](sig,bytes);module=new WebAssembly.Module(bytes)}'
 	+ 'var instance=new WebAssembly.Instance(module,{e:{f:func}})');
+// 本番の Workers は CPU 実行中に時計が進まない (Spectre 対策)。PHP の uniqid() などは時計が進むまで
+// 空回りするので、読むたびにわずかに進めて抜けられるようにする (Workers PHP の nudgeClocks と同じ考え方)
+for (const [name, source] of [['_emscripten_get_now', 'performance.now()'], ['_emscripten_date_now', 'Date.now()']]) {
+	const original = `var ${name}=()=>${source};`;
+	if (!glue.includes(original)) throw new Error(`php-cgi-wasm の glue が想定と異なります (${name})`);
+	glue = glue.replace(original,
+		`var ${name}=(()=>{var last=0;return()=>{var now=${source};last=now>last?now:last+0.01;return last}})();`);
+}
 fs.writeFileSync(path.join(out, 'php', 'php-cgi.mjs'), glue);
 fs.copyFileSync(path.join(cgiDir, wasmName), path.join(out, 'php', 'php-cgi.wasm'));
 
