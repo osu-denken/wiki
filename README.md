@@ -43,6 +43,9 @@ scripts/
 Workers は実行時の wasm コンパイルを禁止しているため、`scripts/build.mjs` で php-cgi の glue にパッチを当てている。
 
 - `dlopen` する共有ライブラリ (mbstring, oniguruma, zlib) は wrangler でコンパイル済みの `WebAssembly.Module` を渡す
+- 本番の Workers は CPU 実行中に時計が進まないため、PHP の `uniqid()` などが時計待ちで空回りする。
+  glue の時計関数 (`_emscripten_get_now` / `_emscripten_date_now`) を読むたびにわずかに進めるようにしている
+  (これがないと描画 1 回に CPU 100ms 以上かかり、Free プランの 10ms を大きく超える)
 - `addFunction` が生成する関数ラッパー wasm は、ビルド時に使われるシグネチャを収集して事前生成する。
   未知のシグネチャが使われるとログに `関数シグネチャ "…" が事前生成されていません` と出るので、
   `scripts/harvest-signatures.mjs` にその操作を追加して再ビルドする
