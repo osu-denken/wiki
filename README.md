@@ -63,6 +63,7 @@ npm run dev      # build してから wrangler dev
 
 ```sh
 npx wrangler r2 bucket create denken-wiki
+npx wrangler r2 bucket lifecycle add denken-wiki expire-sessions sessions/ --expire-days 2   # 期限切れセッションの削除
 npx wrangler secret put PUKIWIKI_ADMINPASS   # 管理者 (admin) のパスワード
 npx wrangler secret put PUKIWIKI_USERPASS    # 一般ユーザー (user) のパスワード
 npm run deploy
