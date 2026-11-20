@@ -1,0 +1,17 @@
+{
+  "name": "denken-wiki",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs && node scripts/harvest-signatures.mjs",
+    "dev": "npm run build && wrangler dev",
+    "deploy": "npm run build && wrangler deploy"
+  },
+  "dependencies": {
+    "php-cgi-wasm": "^0.2.0",
+    "php-wasm-mbstring": "^0.2.0"
+  },
+  "devDependencies": {
+    "wrangler": "^4.165.0"
+  }
+}
