@@ -62,7 +62,7 @@ async function handle({request, url, body, form, env, php, state, sessions}) {
 	const cacheKey = `${url.href}\n${cookie}\n${KEITAI_UA.test(request.headers.get('user-agent') ?? '') ? 'k' : 'd'}`;
 
 	for (let attempt = 1; ; attempt++) {
-		await state.refresh(bucket);
+		await state.refresh(bucket, isWrite);
 
 		const key = `${state.etag}\n${cacheKey}`;
 		if (cacheable) {

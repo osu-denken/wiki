@@ -48,6 +48,9 @@ fs.copyFileSync(path.join(cgiDir, wasmName), path.join(out, 'php', 'php-cgi.wasm
 const mbDir = path.join(root, 'node_modules', 'php-wasm-mbstring');
 fs.copyFileSync(path.join(mbDir, `php${PHP_VERSION}-mbstring.so`), path.join(out, 'php', 'mbstring.so'));
 fs.copyFileSync(path.join(mbDir, 'libonig.so'), path.join(out, 'php', 'libonig.so'));
+const zlibDir = path.join(root, 'node_modules', 'php-wasm-zlib');
+fs.copyFileSync(path.join(zlibDir, `php${PHP_VERSION}-zlib.so`), path.join(out, 'php', 'zlib.so'));
+fs.copyFileSync(path.join(zlibDir, 'libz.so'), path.join(out, 'php', 'libz.so'));
 
 // --- PukiWiki -------------------------------------------------------------
 const app = [];

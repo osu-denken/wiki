@@ -9,6 +9,7 @@ export const OPCACHE_DIR = '/opcache';
 const PHP_INI = `
 extension_dir=/preload
 extension=mbstring.so
+extension=zlib.so
 date.timezone=Asia/Tokyo
 memory_limit=96M
 max_execution_time=0

@@ -9,7 +9,8 @@
   },
   "dependencies": {
     "php-cgi-wasm": "^0.2.0",
-    "php-wasm-mbstring": "^0.2.0"
+    "php-wasm-mbstring": "^0.2.0",
+    "php-wasm-zlib": "^0.2.0"
   },
   "devDependencies": {
     "wrangler": "^4.165.0"

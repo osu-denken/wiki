@@ -19,6 +19,8 @@ const php = await PhpRuntime.create({
 	sharedLibs: {
 		'mbstring.so': await WebAssembly.compile(read('php/mbstring.so')),
 		'libonig.so': await WebAssembly.compile(read('php/libonig.so')),
+		'zlib.so': await WebAssembly.compile(read('php/zlib.so')),
+		'libz.so': await WebAssembly.compile(read('php/libz.so')),
 	},
 	sigModules: {},
 	appBin: read('app.bin'),

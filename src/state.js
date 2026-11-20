@@ -15,6 +15,7 @@ export const DATA_DIRS = ['wiki', 'backup', 'diff', 'cache', 'counter', 'attach'
 const PACK_KEY = 'pack.bin.gz';
 const LAZY_INDEX = '.lazy.json';
 const FETCH_CONCURRENCY = 20;
+const REFRESH_INTERVAL = 1500;
 
 export const isLazy = p => p.startsWith('backup/') || (p.startsWith('attach/') && !p.endsWith('.log'));
 
@@ -24,12 +25,19 @@ export class WikiState {
 		this.etag = null;          // FS に展開済みの pack の etag (R2 に無いときは 'seed')
 		this.known = new Map();    // 最後に同期した時点の {path: {t, l}}
 		this.loaded = new Set();   // 中身を読み込み済みの遅延ファイル
+		this.checkedAt = 0;        // 最後に R2 の etag を確認した時刻
 	}
 
 	get FS() { return this.php.FS; }
 
-	/** R2 の最新状態を FS に反映する。変化がなければ何もしない */
-	async refresh(bucket) {
+	/**
+	 * R2 の最新状態を FS に反映する。変化がなければ何もしない
+	 * @param {boolean} force false なら直近 REFRESH_INTERVAL 以内の確認結果を信用して R2 に問い合わせない
+	 *   (他の isolate での更新が最大その時間だけ遅れて見える。書き込みは etag の条件付き put なので安全)
+	 */
+	async refresh(bucket, force = false) {
+		if (!force && this.etag && Date.now() - this.checkedAt < REFRESH_INTERVAL) return;
+		this.checkedAt = Date.now();
 		const obj = this.etag && this.etag !== 'seed'
 			? await bucket.get(PACK_KEY, {onlyIf: {etagDoesNotMatch: this.etag}})
 			: await bucket.get(PACK_KEY);

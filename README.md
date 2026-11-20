@@ -29,7 +29,7 @@ scripts/
 
 ### 高速化
 
-- PHP インスタンスと展開済みファイルを isolate 内で使い回す。R2 へは毎回 pack の etag 確認 (条件付き GET) だけ
+- PHP インスタンスと展開済みファイルを isolate 内で使い回す。R2 へは pack の etag 確認 (条件付き GET) だけで、閲覧時は 1.5 秒に 1 回に間引く
 - OPcache (ファイルキャッシュ) をビルド時に生成して同梱。cold start でもコンパイルしない
 - 未ログインの GET は描画結果を isolate 内にキャッシュ (pack の etag をキーに含むので更新で自動的に無効化)
 - skin/ image/ の静的ファイルは Static Assets から直接返す
@@ -38,7 +38,7 @@ scripts/
 
 Workers は実行時の wasm コンパイルを禁止しているため、`scripts/build.mjs` で php-cgi の glue にパッチを当てている。
 
-- `dlopen` する共有ライブラリ (mbstring, oniguruma) は wrangler でコンパイル済みの `WebAssembly.Module` を渡す
+- `dlopen` する共有ライブラリ (mbstring, oniguruma, zlib) は wrangler でコンパイル済みの `WebAssembly.Module` を渡す
 - `addFunction` が生成する関数ラッパー wasm は、ビルド時に使われるシグネチャを収集して事前生成する。
   未知のシグネチャが使われるとログに `関数シグネチャ "…" が事前生成されていません` と出るので、
   `scripts/harvest-signatures.mjs` にその操作を追加して再ビルドする
@@ -76,7 +76,7 @@ npm run deploy
 - 書き込みのたびに pack 全体を書き直すので、ページ数が非常に多くなると書き込みが重くなる
 - 添付ファイルは 1MB まで (PukiWiki の既定)。アップロード・削除は管理者のみ (既定)
 - 全ページの添付一覧 (`?plugin=attach&pcmd=list`) はすべての添付を R2 から読み込む
-- バックアップは gzip なし (.txt) で保存される (zlib 拡張を入れていないため)
+- 他の isolate での更新は最大 1.5 秒遅れて見えることがある (閲覧時の R2 確認を間引いているため)
 
 ## ライセンス
 
