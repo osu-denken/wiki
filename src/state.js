@@ -16,12 +16,12 @@ import {decodeArchive, encodeArchive, gzip, gunzip} from './archive.js';
 import {DOCROOT} from './php.js';
 
 export const DATA_DIRS = ['wiki', 'backup', 'diff', 'cache', 'counter', 'attach'];
-const MANIFEST_KEY = 'manifest.json';
+export const MANIFEST_KEY = 'manifest.json';
 const LEGACY_PACK_KEY = 'pack.bin.gz';
 const LEGACY_LAZY_INDEX = '.lazy.json';
 const SHARDS = 16;
 const FETCH_CONCURRENCY = 20;
-const REFRESH_INTERVAL = 1500;
+export const REFRESH_INTERVAL = 1500;
 const REFRESH_RETRIES = 3;
 
 // manifest が無いときの状態 (etag の代わり)
@@ -53,6 +53,9 @@ export class WikiState {
 	}
 
 	get FS() { return this.php.FS; }
+
+	/** R2 の manifest を読み込んだ状態か (seed / 旧形式ではない) */
+	get hasManifest() { return Boolean(this.etag) && this.etag !== SEED && this.etag !== LEGACY; }
 
 	/** プレースホルダの stat に記録済みのサイズを返させる (PHP の stat 系システムコールは FS.stat を通る) */
 	patchStat() {

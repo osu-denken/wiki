@@ -1,13 +1,16 @@
 import {PhpRuntime, DOCROOT} from './php.js';
-import {WikiState} from './state.js';
+import {WikiState, MANIFEST_KEY, REFRESH_INTERVAL} from './state.js';
 import {cgiEnv} from './cgi.js';
 import {SessionStore} from './session.js';
 import assets from './assets.js';
+import seedBin from '../build/seed.bin';
+import {decodeArchive} from './archive.js';
 
 const DEFAULT_PAGE = 'FrontPage';
 const MAX_ATTEMPTS = 3;
 const RENDER_CACHE_ENTRIES = 200;
 const RENDER_CACHE_MAX_BODY = 512 * 1024;
+const EDGE_CACHE_TTL = 7 * 24 * 3600;
 // pukiwiki.ini.php の $agents で keitai プロファイルになる UA の大まかな判定 (描画キャッシュのキー用)
 const KEITAI_UA = /\b(?:Windows CE|NetFront|CNF|AveFront|AVE-Front|UP\.Browser|DoCoMo|J-PHONE|Vodafone|SoftBank|KDDI|DDIPOCKET|WILLCOM|PDXGW|ASTEL|L-mode)\b/i;
 
@@ -27,13 +30,39 @@ function boot() {
 	ready ??= PhpRuntime.create({
 		...assets,
 		onSignature: sig => console.error(`関数シグネチャ "${sig}" が事前生成されていません。scripts/harvest-signatures.mjs に該当する操作を追加してください`),
-	}).then(php => ({php, state: new WikiState(php), sessions: new SessionStore(php)}));
+	}).then(async php => {
+		await warmUp(php);
+		return {php, state: new WikiState(php), sessions: new SessionStore(php)};
+	});
 	ready.catch(() => { ready = null; });
 	return ready;
 }
 
+// 初期データでページを 1 回描画して、wasm の遅延コンパイルと OPcache の読み込みを済ませておく。
+// 書き込んだデータは最初の refresh で R2 の内容に置き換わる
+async function warmUp(php) {
+	for (const f of decodeArchive(seedBin)) {
+		const p = `${DOCROOT}/${f.p}`;
+		php.FS.mkdirTree(p.slice(0, p.lastIndexOf('/')));
+		php.FS.writeFile(p, f.data);
+	}
+	// よく使われる処理 (ページ表示・一覧・検索・最終更新・編集画面) を一通り通す
+	for (const query of ['', 'FormattingRules', 'cmd=list', 'cmd=search&word=Wiki', 'RecentChanges', 'cmd=edit&page=SandBox']) {
+		await php.run({
+			REQUEST_METHOD: 'GET', REDIRECT_STATUS: '200', DOCUMENT_ROOT: DOCROOT,
+			SCRIPT_FILENAME: `${DOCROOT}/index.php`, SCRIPT_NAME: '/index.php',
+			REQUEST_URI: query ? `/?${query}` : '/', QUERY_STRING: query,
+			SERVER_NAME: 'localhost', SERVER_PORT: '443', HTTPS: 'on',
+		}, new Uint8Array(0));
+	}
+}
+
+// isolate の起動時 (グローバルスコープ) に PHP を立ち上げておく。
+// 起動時の CPU 時間はリクエストの CPU 制限 (Free プランは 10ms) とは別枠
+await boot().catch(e => console.error('PHP の起動に失敗しました', e));
+
 export default {
-	async fetch(request, env) {
+	async fetch(request, env, ctx) {
 		const url = new URL(request.url);
 		if (url.pathname !== '/' && url.pathname !== '/index.php') {
 			// skin/ や image/ は Static Assets が先に返すので、ここに来るのはそれ以外
@@ -42,24 +71,77 @@ export default {
 		if (!['GET', 'HEAD', 'POST'].includes(request.method)) {
 			return new Response('Method Not Allowed', {status: 405, headers: {Allow: 'GET, HEAD, POST'}});
 		}
-		const body = request.method === 'POST' ? new Uint8Array(await request.arrayBuffer()) : new Uint8Array(0);
-		const form = request.method === 'POST' ? await parseForm(request.headers.get('content-type'), body) : new URLSearchParams();
-
 		const started = Date.now();
+		const isWrite = request.method === 'POST';
+		const cookie = request.headers.get('cookie') ?? '';
+		// ログイン中 (セッションあり) の表示は、他 isolate でのログアウト等を反映するためキャッシュしない
+		const cacheable = !isWrite && !/(?:^|;\s*)PHPSESSID=/.test(cookie);
+		const cacheKey = `${url.href}\n${cookie}\n${KEITAI_UA.test(request.headers.get('user-agent') ?? '') ? 'k' : 'd'}`;
+
+		// 未ログインの閲覧は、PHP を起動する前にデータセンター共有のキャッシュを見る
+		if (cacheable) {
+			const etag = await currentEtag(env.WIKI);
+			const hit = etag && await edgeGet(url, `${etag}\n${cacheKey}`);
+			if (hit) return withTiming(buildResponse(request, hit, 'edge'), started);
+		}
+
+		const body = isWrite ? new Uint8Array(await request.arrayBuffer()) : new Uint8Array(0);
+		const form = isWrite ? await parseForm(request.headers.get('content-type'), body) : new URLSearchParams();
+
 		const {php, state, sessions} = await boot();
-		const response = await exclusive(() => handle({request, url, body, form, env, php, state, sessions}));
-		response.headers.set('Server-Timing', `total;dur=${Date.now() - started}`);
-		return response;
+		const response = await exclusive(() => handle({request, url, body, form, env, ctx, php, state, sessions, isWrite, cookie, cacheable, cacheKey}));
+		return withTiming(response, started);
 	},
 };
 
-async function handle({request, url, body, form, env, php, state, sessions}) {
+function withTiming(response, started) {
+	response.headers.set('Server-Timing', `total;dur=${Date.now() - started}`);
+	return response;
+}
+
+// manifest の etag (データの版)。PHP を起動していない isolate でも共有キャッシュを使えるように別に持つ
+let knownEtag = null;
+let etagCheckedAt = 0;
+
+async function currentEtag(bucket) {
+	if (Date.now() - etagCheckedAt < REFRESH_INTERVAL) return knownEtag;
+	const head = await bucket.head(MANIFEST_KEY);
+	rememberEtag(head?.etag ?? null);
+	return knownEtag;
+}
+
+function rememberEtag(etag) {
+	knownEtag = etag;
+	etagCheckedAt = Date.now();
+}
+
+// 共有キャッシュ (Cache API)。キーに manifest の etag を含めるので、更新されれば使われなくなる
+async function edgeRequest(url, key) {
+	const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(key)));
+	const hex = [...digest].map(b => b.toString(16).padStart(2, '0')).join('');
+	return new Request(`${url.origin}/__render-cache/${hex}`);
+}
+
+async function edgeGet(url, key) {
+	const res = await caches.default.match(await edgeRequest(url, key));
+	if (!res) return null;
+	const headers = new Headers(res.headers);
+	headers.delete('cache-control');
+	const original = res.headers.get('x-original-cache-control');
+	if (original) headers.set('Cache-Control', original);
+	headers.delete('x-original-cache-control');
+	return {status: res.status, headers: [...headers], body: new Uint8Array(await res.arrayBuffer())};
+}
+
+async function edgePut(url, key, entry) {
+	const headers = new Headers(entry.headers);
+	if (headers.has('cache-control')) headers.set('X-Original-Cache-Control', headers.get('cache-control'));
+	headers.set('Cache-Control', `public, max-age=${EDGE_CACHE_TTL}`);
+	await caches.default.put(await edgeRequest(url, key), new Response(entry.body, {status: entry.status, headers}));
+}
+
+async function handle({request, url, body, form, env, ctx, php, state, sessions, isWrite, cookie, cacheable, cacheKey}) {
 	const bucket = env.WIKI;
-	const isWrite = request.method === 'POST';
-	const cookie = request.headers.get('cookie') ?? '';
-	// ログイン中 (セッションあり) の表示は、他 isolate でのログアウト等を反映するためキャッシュしない
-	const cacheable = !isWrite && !/(?:^|;\s*)PHPSESSID=/.test(cookie);
-	const cacheKey = `${url.href}\n${cookie}\n${KEITAI_UA.test(request.headers.get('user-agent') ?? '') ? 'k' : 'd'}`;
 
 	for (let attempt = 1; ; attempt++) {
 		await state.refresh(bucket, isWrite);
@@ -107,7 +189,9 @@ async function handle({request, url, body, form, env, php, state, sessions}) {
 			&& !result.headers.has('set-cookie') && result.body.byteLength <= RENDER_CACHE_MAX_BODY) {
 			renderCache.set(key, entry);
 			if (renderCache.size > RENDER_CACHE_ENTRIES) renderCache.delete(renderCache.keys().next().value);
+			if (state.hasManifest) ctx.waitUntil(edgePut(url, key, entry).catch(e => console.warn('edge cache put failed', e)));
 		}
+		if (state.hasManifest) rememberEtag(state.etag);
 		return buildResponse(request, entry, 'php');
 	}
 }

@@ -32,7 +32,10 @@ scripts/
 
 - PHP インスタンスと展開済みファイルを isolate 内で使い回す。R2 へは manifest の etag 確認 (条件付き GET) だけで、閲覧時は 1.5 秒に 1 回に間引く
 - OPcache (ファイルキャッシュ) をビルド時に生成して同梱。cold start でもコンパイルしない
-- 未ログインの GET は描画結果を isolate 内にキャッシュ (manifest の etag をキーに含むので更新で自動的に無効化)
+- 未ログインの GET は描画結果をキャッシュ (manifest の etag をキーに含むので更新で自動的に無効化)。
+  isolate 内のメモリと、データセンター共有の Cache API の 2 段。共有キャッシュは PHP を起動する前に確認する
+- isolate の起動時 (グローバルスコープ) に PHP を立ち上げ、代表的なページを一通り描画して wasm の遅延コンパイルを済ませる
+  (起動時の処理は約 230ms。Workers の起動時間の上限に注意)
 - skin/ image/ の静的ファイルは Static Assets から直接返す
 
 ### Workers 向けの工夫
