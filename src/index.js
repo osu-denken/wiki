@@ -192,7 +192,40 @@ async function handle({request, url, body, form, env, ctx, php, state, sessions,
 			if (state.hasManifest) ctx.waitUntil(edgePut(url, key, entry).catch(e => console.warn('edge cache put failed', e)));
 		}
 		if (state.hasManifest) rememberEtag(state.etag);
+		if (isWrite && (changes.changed.length || changes.removed.length) && state.hasManifest) {
+			// 更新後に最初に見る人のために、よく見られるページを先に描画してキャッシュしておく
+			const targets = [new URL('/', url), new URL('/?RecentChanges', url)];
+			const location = result.headers.get('location');
+			if (location) targets.push(new URL(location, url));
+			ctx.waitUntil(exclusive(() => prerender({targets, env, php, state})).catch(e => console.warn('prerender failed', e)));
+		}
 		return buildResponse(request, entry, 'php');
+	}
+}
+
+async function prerender({targets, env, php, state}) {
+	const bucket = env.WIKI;
+	const seen = new Set();
+	for (const target of targets) {
+		if (target.pathname !== '/' || seen.has(target.href)) continue;
+		seen.add(target.href);
+		await state.refresh(bucket);
+		const key = `${state.etag}\n${target.href}\n\nd`; // 未ログイン (Cookie なし)・通常の UA 向け
+		if (renderCache.has(key)) continue;
+
+		const request = new Request(target, {headers: {'user-agent': 'Mozilla/5.0 (prerender)'}});
+		await state.ensure(bucket, lazyMatcher(target, new URLSearchParams(), false, state));
+		const result = await php.run(cgiEnv(request, target, new Uint8Array(0), env), new Uint8Array(0));
+		const changes = state.diff();
+		if (changes.changed.length || changes.removed.length) {
+			// キャッシュの再生成などで書き込みがあった場合は保存だけして、描画結果は使わない
+			await state.commit(bucket, changes);
+			continue;
+		}
+		if (result.status !== 200 || result.headers.has('set-cookie') || result.body.byteLength > RENDER_CACHE_MAX_BODY) continue;
+		const entry = {status: result.status, headers: [...result.headers], body: result.body};
+		renderCache.set(key, entry);
+		await edgePut(target, key, entry);
 	}
 }
 

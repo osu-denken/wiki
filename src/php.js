@@ -49,6 +49,15 @@ class ByteSink {
 		}
 		this.buf[this.length++] = byte & 0xff;
 	}
+	pushBytes(bytes) {
+		if (this.length + bytes.length > this.buf.length) {
+			const next = new Uint8Array(Math.max(this.buf.length * 2, this.length + bytes.length));
+			next.set(this.buf.subarray(0, this.length));
+			this.buf = next;
+		}
+		this.buf.set(bytes, this.length);
+		this.length += bytes.length;
+	}
 	bytes() { return this.buf.subarray(0, this.length); }
 }
 
@@ -81,6 +90,17 @@ export class PhpRuntime {
 			printErr: line => console.error('[php]', line),
 		});
 		const FS = self.module.FS;
+		// 標準出力・標準エラーは既定だと 1 バイトごとに stdout/stderr コールバックを呼ぶので、バッファごとに受け取る
+		for (const [fd, sink] of [[1, () => self.out], [2, () => self.err]]) {
+			const stream = FS.getStream(fd);
+			stream.stream_ops = {
+				...stream.stream_ops,
+				write(_stream, buffer, offset, length) {
+					sink().pushBytes(buffer.subarray(offset, offset + length));
+					return length;
+				},
+			};
+		}
 		FS.mkdirTree('/preload');
 		FS.mkdirTree('/tmp');
 		FS.mkdirTree(OPCACHE_DIR);

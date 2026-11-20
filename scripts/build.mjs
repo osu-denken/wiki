@@ -81,6 +81,13 @@ function walk(dir) {
 }
 walk(wikiSrc);
 
+// 静的ファイルのブラウザキャッシュ (ファイル名に版を含まないので 1 日)
+fs.writeFileSync(path.join(out, 'public', '_headers'), [
+	'/skin/*', '  Cache-Control: public, max-age=86400',
+	'/image/*', '  Cache-Control: public, max-age=86400',
+	'',
+].join('\n'));
+
 // 初期ページの更新日時はデプロイ時刻にそろえる
 const now = Date.now();
 for (const f of seed) f.t = now;
